@@ -31,9 +31,15 @@ enum cxd2841er_xtal {
 	SONY_XTAL_41000 /* 41 MHz */
 };
 
+enum cxd2841er_ts_mode {
+	SONY_TS_PARALLEL, 
+	SONY_TS_SERIAL
+};
+
 struct cxd2841er_config {
 	u8	i2c_addr;
 	enum cxd2841er_xtal	xtal;
+  enum cxd2841er_ts_mode ts_mode;
 };
 
 #if IS_REACHABLE(CONFIG_DVB_CXD2841ER)

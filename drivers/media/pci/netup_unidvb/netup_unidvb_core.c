@@ -36,6 +36,8 @@
 #include "ascot2e.h"
 #include "helene.h"
 #include "lnbh25.h"
+#include "lgdt3306a.h"
+#include "atbm888x.h"
 
 static int spi_enable;
 module_param(spi_enable, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
@@ -64,6 +66,20 @@ DVB_DEFINE_MOD_OPT_ADAPTER_NR(adapter_nr);
 #define GPIO_RFB_CTL		(1 << 3)
 #define GPIO_FEA_TU_RESET	(1 << 4)
 #define GPIO_FEB_TU_RESET	(1 << 5)
+
+#define GPIO_FEA_DTMB	(1 << 6)
+#define GPIO_FEA_ATSC	(2 << 6)
+#define GPIO_FEB_DTMB	(1 << 8)
+#define GPIO_FEB_ATSC	(2 << 8)
+
+/* TS muxing control */
+#define GPIO_FEA_DISABLE_DVB	(1 << 10)
+#define GPIO_FEA_DISABLE_DTMB	(1 << 11)
+#define GPIO_FEA_DISABLE_ATSC	(1 << 12)
+#define GPIO_FEB_DISABLE_DVB	(1 << 13)
+#define GPIO_FEB_DISABLE_DTMB	(1 << 14)
+#define GPIO_FEB_DISABLE_ATSC	(1 << 15)
+
 /* DMA base address */
 #define NETUP_DMA0_ADDR		0x4900
 #define NETUP_DMA1_ADDR		0x4940
@@ -120,9 +136,42 @@ struct netup_unidvb_buffer {
 static int netup_unidvb_tuner_ctrl(void *priv, int is_dvb_tc);
 static void netup_unidvb_queue_cleanup(struct netup_dma *dma);
 
+static struct lgdt3306a_config lgdt3306a_config = {
+  // .i2c_addr               = 0x92 >> 1,
+  .i2c_addr               = 0xb2 >> 1,
+  .qam_if_khz             = 4000,
+  .vsb_if_khz             = 3250,
+  .deny_i2c_rptr          = 1, /* Disabled */
+  .spectral_inversion     = 0, /* Disabled */
+  .mpeg_mode              = LGDT3306A_MPEG_SERIAL,
+  .tpclk_edge             = LGDT3306A_TPCLK_RISING_EDGE,
+  .tpvalid_polarity       = LGDT3306A_TP_VALID_HIGH,
+  .xtalMHz                = 24, /* 24 or 25 */
+};
+
+static struct atbm888x_config atbm888x_config = {
+  .demod_address = 0x40,
+  .serial_ts = 1,
+  .ts_sampling_edge = 1, // netup: we need falling edge
+  .ts_data_bit = 0, // netup: data should be on TS[0] pin
+  .ts_clk_gated = 0, // netup: we need TS_CLOCK_CONST_OUTPUT
+  .osc_clk_freq = 24000, /* in kHz */
+  .if_freq = 4800, /* kHz */
+  // .if_freq = 5000, /* kHz */
+  // .if_freq = 0, /* zero IF */
+  .zif_swap_iq = 0,
+  // .zif_swap_iq = 1,
+  // .agc_min = 0x2E,
+  // .agc_max = 0xFF,
+  .agc_min = 0x00,
+  .agc_max = 0xFF,
+  .agc_hold_loop = 0,
+};
+
 static struct cxd2841er_config demod_config = {
 	.i2c_addr = 0xc8,
-	.xtal = SONY_XTAL_24000
+	.xtal = SONY_XTAL_24000,
+  .ts_mode = SONY_TS_PARALLEL
 };
 
 static struct horus3a_config horus3a_conf = {
@@ -149,7 +198,7 @@ static struct lnbh25_config lnbh25_conf = {
 
 static int netup_unidvb_tuner_ctrl(void *priv, int is_dvb_tc)
 {
-	u8 reg, mask;
+	u16 reg, mask;
 	struct netup_dma *dma = priv;
 	struct netup_unidvb_dev *ndev;
 
@@ -158,19 +207,36 @@ static int netup_unidvb_tuner_ctrl(void *priv, int is_dvb_tc)
 	ndev = dma->ndev;
 	dev_dbg(&ndev->pci_dev->dev, "%s(): num %d is_dvb_tc %d\n",
 		__func__, dma->num, is_dvb_tc);
-	reg = readb(ndev->bmmio0 + GPIO_REG_IO);
+	reg = readw(ndev->bmmio0 + GPIO_REG_IO);
 	mask = (dma->num == 0) ? GPIO_RFA_CTL : GPIO_RFB_CTL;
 
 	/* inverted tuner control in hw rev. 1.4 */
-	if (ndev->rev == NETUP_HW_REV_1_4)
+	if (ndev->rev != NETUP_HW_REV_1_3)
 		is_dvb_tc = !is_dvb_tc;
 
 	if (!is_dvb_tc)
 		reg |= mask;
 	else
 		reg &= ~mask;
-	writeb(reg, ndev->bmmio0 + GPIO_REG_IO);
+	writew(reg, ndev->bmmio0 + GPIO_REG_IO);
 	return 0;
+}
+
+void reset_fe(struct netup_unidvb_dev *ndev){
+#if 0
+	u16 gpio_reg;
+  writew(0x00, ndev->bmmio0 + GPIO_REG_IO);
+  msleep(100);
+  gpio_reg =
+    GPIO_FEA_RESET | GPIO_FEB_RESET |
+    GPIO_FEA_TU_RESET | GPIO_FEB_TU_RESET |
+    GPIO_RFA_CTL | GPIO_RFB_CTL;
+  writew(gpio_reg, ndev->bmmio0 + GPIO_REG_IO);
+  printk("fe reset done\n");
+#endif
+	dev_dbg(&ndev->pci_dev->dev,
+		"%s(): GPIO_REG_IO 0x%x\n",
+		__func__, (int)readw(ndev->bmmio0 + GPIO_REG_IO));
 }
 
 static void netup_unidvb_dev_enable(struct netup_unidvb_dev *ndev)
@@ -180,18 +246,39 @@ static void netup_unidvb_dev_enable(struct netup_unidvb_dev *ndev)
 	/* enable PCI-E interrupts */
 	writel(AVL_IRQ_ENABLE, ndev->bmmio0 + AVL_PCIE_IENR);
 	/* unreset frontends bits[0:1] */
-	writeb(0x00, ndev->bmmio0 + GPIO_REG_IO);
+	writew(0x00, ndev->bmmio0 + GPIO_REG_IO);
 	msleep(100);
 	gpio_reg =
 		GPIO_FEA_RESET | GPIO_FEB_RESET |
 		GPIO_FEA_TU_RESET | GPIO_FEB_TU_RESET |
 		GPIO_RFA_CTL | GPIO_RFB_CTL;
-	writeb(gpio_reg, ndev->bmmio0 + GPIO_REG_IO);
+
+#if 0
+  /* enable DTBM */
+	gpio_reg |= GPIO_FEA_DTMB | GPIO_FEB_DTMB |
+    GPIO_FEA_DISABLE_DVB | GPIO_FEA_DISABLE_ATSC |
+    GPIO_FEB_DISABLE_DVB | GPIO_FEB_DISABLE_ATSC;
+#endif
+
+#if 1
+  /* enable DVB */
+	gpio_reg = gpio_reg |
+    GPIO_FEA_DISABLE_DTMB | GPIO_FEA_DISABLE_ATSC |
+    GPIO_FEB_DISABLE_DTMB | GPIO_FEB_DISABLE_ATSC;
+#endif
+
+#if 0
+  /* enable ATSC */
+	gpio_reg = gpio_reg | GPIO_FEA_ATSC | GPIO_FEB_ATSC |
+    GPIO_FEA_DISABLE_DTMB | GPIO_FEA_DISABLE_DVB |
+    GPIO_FEB_DISABLE_DTMB | GPIO_FEB_DISABLE_DVB;
+#endif
+
+	writew(gpio_reg, ndev->bmmio0 + GPIO_REG_IO);
 	dev_dbg(&ndev->pci_dev->dev,
 		"%s(): AVL_PCIE_IENR 0x%x GPIO_REG_IO 0x%x\n",
 		__func__, readl(ndev->bmmio0 + AVL_PCIE_IENR),
-		(int)readb(ndev->bmmio0 + GPIO_REG_IO));
-
+		(int)readw(ndev->bmmio0 + GPIO_REG_IO));
 }
 
 static void netup_unidvb_dma_enable(struct netup_dma *dma, int enable)
@@ -246,7 +333,7 @@ static irqreturn_t netup_dma_interrupt(struct netup_dma *dma)
 		dma->data_offset = (u32)(dma->addr_last - dma->addr_phys);
 	}
 	dma->addr_last = addr_curr;
-	queue_work(dma->ndev->wq, &dma->work);
+  queue_work(dma->ndev->wq, &dma->work);
 irq_handled:
 	spin_unlock_irqrestore(&dma->lock, flags);
 	return IRQ_HANDLED;
@@ -341,6 +428,7 @@ static int netup_unidvb_start_streaming(struct vb2_queue *q, unsigned int count)
 
 	dev_dbg(&dma->ndev->pci_dev->dev, "%s()\n", __func__);
 	netup_unidvb_dma_enable(dma, 1);
+  reset_fe(dma->ndev);
 	return 0;
 }
 
@@ -387,16 +475,24 @@ static int netup_unidvb_dvb_init(struct netup_unidvb_dev *ndev,
 {
 	int fe_count = 0;
 	int i = 0;
-	struct vb2_dvb_frontend *fes[4];
+	struct vb2_dvb_frontend *fes[6];
 	u8 fe_name[32];
 
 	if (ndev->rev == NETUP_HW_REV_1_3) {
 		fe_count = 3;
 		demod_config.xtal = SONY_XTAL_20500;
-	} else {
+	} else if (ndev->rev == NETUP_HW_REV_1_4) {
 		fe_count = 4;
 		demod_config.xtal = SONY_XTAL_24000;
-	}
+	} else if (ndev->rev == NETUP_HW_REV_2_0) {
+		fe_count = 6;
+		demod_config.xtal = SONY_XTAL_24000;
+		demod_config.ts_mode = SONY_TS_SERIAL;
+	} else {
+		dev_dbg(&ndev->pci_dev->dev,
+			"%s(): unknown card revision 0x%x\n", __func__, ndev->rev);
+		return -ENODEV;
+  }
 
 	if (num < 0 || num > 1) {
 		dev_dbg(&ndev->pci_dev->dev,
@@ -457,6 +553,7 @@ static int netup_unidvb_dvb_init(struct netup_unidvb_dev *ndev,
 			dev_err(&ndev->pci_dev->dev,
 					"%s(): unable to attach HELENE DVB-S/S2 tuner frontend\n",
 					__func__);
+      // goto atsc;
 			goto frontend_detach;
 		}
 	}
@@ -465,7 +562,7 @@ static int netup_unidvb_dvb_init(struct netup_unidvb_dev *ndev,
 			&lnbh25_conf, &ndev->i2c[num].adap)) {
 		dev_dbg(&ndev->pci_dev->dev,
 			"%s(): unable to attach SEC frontend\n", __func__);
-		goto frontend_detach;
+		// goto frontend_detach;
 	}
 
 	/* DVB-T/T2 frontend */
@@ -525,7 +622,7 @@ static int netup_unidvb_dvb_init(struct netup_unidvb_dev *ndev,
 		}
 	}
 
-	if (ndev->rev == NETUP_HW_REV_1_4) {
+	if (ndev->rev == NETUP_HW_REV_2_0 || ndev->rev == NETUP_HW_REV_1_4) {
 		/* ISDB-T frontend */
 		fes[3]->dvb.frontend = dvb_attach(cxd2841er_attach_i,
 				&demod_config, &ndev->i2c[num].adap);
@@ -541,6 +638,46 @@ static int netup_unidvb_dvb_init(struct netup_unidvb_dev *ndev,
 					&helene_conf, &ndev->i2c[num].adap)) {
 			dev_err(&ndev->pci_dev->dev,
 					"%s(): unable to attach HELENE Ter tuner frontend\n",
+					__func__);
+			goto frontend_detach;
+		}
+	}
+
+	if (ndev->rev == NETUP_HW_REV_2_0) {
+		/* DTMB frontend */
+		fes[4]->dvb.frontend = dvb_attach(atbm888x_attach,
+				&atbm888x_config, &ndev->i2c[num].adap);
+		if (fes[4]->dvb.frontend == NULL) {
+			dev_dbg(&ndev->pci_dev->dev,
+				"%s(): unable to attach DMB-TH frontend\n",
+				__func__);
+			goto frontend_detach;
+		}
+		fes[4]->dvb.frontend->id = 4;
+		helene_conf.set_tuner_priv = &ndev->dma[num];
+		if (!dvb_attach(helene_attach, fes[4]->dvb.frontend,
+					&helene_conf, &ndev->i2c[num].adap)) {
+			dev_err(&ndev->pci_dev->dev,
+					"%s(): unable to attach HELENE DMB-TH tuner frontend\n",
+					__func__);
+			goto frontend_detach;
+		}
+
+		/* ATSC frontend */
+		fes[5]->dvb.frontend = dvb_attach(lgdt3306a_attach,
+				&lgdt3306a_config, &ndev->i2c[num].adap);
+		if (fes[5]->dvb.frontend == NULL) {
+			dev_dbg(&ndev->pci_dev->dev,
+				"%s(): unable to attach ATSC frontend\n",
+				__func__);
+			goto frontend_detach;
+		}
+		fes[5]->dvb.frontend->id = 5;
+		helene_conf.set_tuner_priv = &ndev->dma[num];
+		if (!dvb_attach(helene_attach, fes[5]->dvb.frontend,
+					&helene_conf, &ndev->i2c[num].adap)) {
+			dev_err(&ndev->pci_dev->dev,
+					"%s(): unable to attach HELENE DMB-TH tuner frontend\n",
 					__func__);
 			goto frontend_detach;
 		}
@@ -637,6 +774,8 @@ static void netup_unidvb_dma_worker(struct work_struct *work)
 	struct netup_unidvb_buffer *buf;
 	unsigned long flags;
 
+  dev_dbg(&ndev->pci_dev->dev,
+      "%s(): data_size = %d\n", __func__, dma->data_size);
 	spin_lock_irqsave(&dma->lock, flags);
 	if (dma->data_size == 0) {
 		dev_dbg(&ndev->pci_dev->dev,
@@ -676,16 +815,20 @@ work_done:
 
 static void netup_unidvb_queue_cleanup(struct netup_dma *dma)
 {
+	struct netup_unidvb_dev *ndev = dma->ndev;
 	struct netup_unidvb_buffer *buf;
 	unsigned long flags;
 
 	spin_lock_irqsave(&dma->lock, flags);
+  dev_dbg(&ndev->pci_dev->dev, "%s() start.listempty=%d\n", __func__, list_empty(&dma->free_buffers));
 	while (!list_empty(&dma->free_buffers)) {
 		buf = list_first_entry(&dma->free_buffers,
 			struct netup_unidvb_buffer, list);
 		list_del(&buf->list);
 		vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
-	}
+	  dev_dbg(&ndev->pci_dev->dev, "%s() DONE buf=0x%x\n", __func__, &buf->vb.vb2_buf);
+  }
+  dev_dbg(&ndev->pci_dev->dev, "%s() done.listempty=%d\n", __func__, list_empty(&dma->free_buffers));
 	spin_unlock_irqrestore(&dma->lock, flags);
 }
 
@@ -695,7 +838,8 @@ static void netup_unidvb_dma_timeout(unsigned long data)
 	struct netup_unidvb_dev *ndev = dma->ndev;
 
 	dev_dbg(&ndev->pci_dev->dev, "%s()\n", __func__);
-	netup_unidvb_queue_cleanup(dma);
+  netup_unidvb_queue_cleanup(dma);
+  // queue_work(dma->ndev->wq, &dma->work);
 }
 
 static int netup_unidvb_dma_init(struct netup_unidvb_dev *ndev, int num)
@@ -842,7 +986,8 @@ static int netup_unidvb_initdev(struct pci_dev *pci_dev,
 	netup_unidvb_request_modules(&pci_dev->dev);
 
 	/* Check card revision */
-	if (pci_dev->revision != NETUP_PCI_DEV_REVISION) {
+	if (pci_dev->revision != NETUP_PCI_DEV_REVISION && (
+        pci_dev->device == NETUP_HW_REV_1_3 || pci_dev->device == NETUP_HW_REV_1_4)) {
 		dev_err(&pci_dev->dev,
 			"netup_unidvb: expected card revision %d, got %d\n",
 			NETUP_PCI_DEV_REVISION, pci_dev->revision);
@@ -860,10 +1005,18 @@ static int netup_unidvb_initdev(struct pci_dev *pci_dev,
 		goto dev_alloc_err;
 
 	/* detect hardware revision */
-	if (pci_dev->device == NETUP_HW_REV_1_3)
-		ndev->rev = NETUP_HW_REV_1_3;
-	else
-		ndev->rev = NETUP_HW_REV_1_4;
+  if (pci_dev->device == NETUP_HW_REV_1_3)
+    ndev->rev = NETUP_HW_REV_1_3;
+  else if (pci_dev->device == NETUP_HW_REV_1_4)
+    ndev->rev = NETUP_HW_REV_1_4;
+  else if (pci_dev->device == NETUP_HW_REV_2_0)
+    ndev->rev = NETUP_HW_REV_2_0;
+  else {
+    dev_err(&pci_dev->dev,
+        "%s(): board (0x%x) unknown hardware revision 0x%x\n",
+        __func__, pci_dev->device, ndev->rev);
+    goto wq_create_err;
+  }
 
 	dev_info(&pci_dev->dev,
 		"%s(): board (0x%x) hardware revision 0x%x\n",
@@ -980,7 +1133,8 @@ static int netup_unidvb_initdev(struct pci_dev *pci_dev,
 	usleep_range(5000, 10000);
 	if (netup_unidvb_dvb_setup(ndev)) {
 		dev_err(&pci_dev->dev, "netup_unidvb: DVB setup failed\n");
-		goto dvb_setup_err;
+        return 0;
+		// goto dvb_setup_err;
 	}
 	if (netup_unidvb_ci_setup(ndev, pci_dev)) {
 		dev_err(&pci_dev->dev, "netup_unidvb: CI setup failed\n");
@@ -1069,6 +1223,7 @@ static void netup_unidvb_finidev(struct pci_dev *pci_dev)
 static struct pci_device_id netup_unidvb_pci_tbl[] = {
 	{ PCI_DEVICE(0x1b55, 0x18f6) }, /* hw rev. 1.3 */
 	{ PCI_DEVICE(0x1b55, 0x18f7) }, /* hw rev. 1.4 */
+	{ PCI_DEVICE(0x1b55, 0x18f8) }, /* hw rev. 2.0 */
 	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, netup_unidvb_pci_tbl);

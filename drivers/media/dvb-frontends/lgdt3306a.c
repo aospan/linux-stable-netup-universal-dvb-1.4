@@ -24,7 +24,7 @@
 #include "lgdt3306a.h"
 
 
-static int debug;
+static int debug = 0;
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "set debug level (info=1, reg=2 (or-able))");
 
@@ -123,7 +123,8 @@ static int lgdt3306a_write_reg(struct lgdt3306a_state *state, u16 reg, u8 val)
 		.buf = buf, .len = 3,
 	};
 
-	dbg_reg("reg: 0x%04x, val: 0x%02x\n", reg, val);
+	dbg_reg("wrte addr: 0x%x reg: 0x%04x, val: 0x%02x\n", 
+      state->cfg->i2c_addr, reg, val);
 
 	ret = i2c_transfer(state->i2c_adap, &msg, 1);
 
@@ -159,7 +160,8 @@ static int lgdt3306a_read_reg(struct lgdt3306a_state *state, u16 reg, u8 *val)
 		else
 			return -EREMOTEIO;
 	}
-	dbg_reg("reg: 0x%04x, val: 0x%02x\n", reg, *val);
+	dbg_reg("read addr: 0x%x reg: 0x%04x, val: 0x%02x\n",
+      state->cfg->i2c_addr, reg, *val);
 
 	return 0;
 }
@@ -639,7 +641,8 @@ static int lgdt3306a_agc_setup(struct lgdt3306a_state *state,
 			      struct dtv_frontend_properties *p)
 {
 	/* TODO: anything we want to do here??? */
-	dbg_info("\n");
+	dbg_info("%s\n", __func__);
+  lgdt3306a_set_reg_bit(state, 0x0003, 4, 0);
 
 	switch (p->modulation) {
 	case VSB_8:

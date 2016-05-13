@@ -80,6 +80,7 @@ obj-$(CONFIG_DVB_LGS8GL5) += lgs8gl5.o
 obj-$(CONFIG_DVB_TDA665x) += tda665x.o
 obj-$(CONFIG_DVB_LGS8GXX) += lgs8gxx.o
 obj-$(CONFIG_DVB_ATBM8830) += atbm8830.o
+obj-$(CONFIG_DVB_ATBM888x) += atbm888x.o
 obj-$(CONFIG_DVB_DUMMY_FE) += dvb_dummy_fe.o
 obj-$(CONFIG_DVB_AF9013) += af9013.o
 obj-$(CONFIG_DVB_CX24116) += cx24116.o

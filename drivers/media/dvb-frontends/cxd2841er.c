@@ -471,9 +471,9 @@ static int cxd2841er_retune_active(struct cxd2841er_priv *priv,
 			return cxd2841er_sleep_tc_to_active_c_band(
 					priv, p->bandwidth_hz);
 		case SYS_ISDBT:
-			cxd2841er_active_i_to_sleep_tc(priv);
-			cxd2841er_sleep_tc_to_shutdown(priv);
-			cxd2841er_shutdown_to_sleep_tc(priv);
+			// cxd2841er_active_i_to_sleep_tc(priv);
+			// cxd2841er_sleep_tc_to_shutdown(priv);
+			// cxd2841er_shutdown_to_sleep_tc(priv);
 			return cxd2841er_sleep_tc_to_active_i(
 					priv, p->bandwidth_hz);
 		}
@@ -835,13 +835,37 @@ static int cxd2841er_tune_done(struct cxd2841er_priv *priv)
 	return 0;
 }
 
-/* Set TS parallel mode */
+/* Configure TS */
+static int cxd2841er_set_ts_mode(struct cxd2841er_priv *priv)
+{
+  uint8_t serial_ts = 0;
+
+  dev_dbg(&priv->i2c->dev, "%s() TS mode=%d", __func__, priv->config->ts_mode);
+	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x00);
+  if (priv->config->ts_mode == SONY_TS_SERIAL){
+    cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xc4, 0x80, 0x80);
+    /* Serial output pin data[0] */
+    cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xc4, 0x00, 0x08);
+		dev_dbg(&priv->i2c->dev, "%s() TS serial", __func__);
+  } else {
+    cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xc4, 0x00, 0x80);
+		dev_dbg(&priv->i2c->dev, "%s() TS parallel", __func__);
+  }
+	cxd2841er_read_reg(priv, I2C_SLVT, 0xc4, &serial_ts);
+  dev_dbg(&priv->i2c->dev, "%s() TS reg=0x%x", __func__, serial_ts);
+
+  return 0;
+}
+
 static void cxd2841er_set_ts_clock_mode(struct cxd2841er_priv *priv,
 					u8 system)
 {
 	u8 serial_ts, ts_rate_ctrl_off, ts_in_off;
 
-	dev_dbg(&priv->i2c->dev, "%s()\n", __func__);
+	dev_dbg(&priv->i2c->dev, "%s() system=%d\n", __func__, system);
+
+  cxd2841er_set_ts_mode(priv);
+
 	/* Set SLV-T Bank : 0x00 */
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x00);
 	cxd2841er_read_reg(priv, I2C_SLVT, 0xc4, &serial_ts);
@@ -849,6 +873,18 @@ static void cxd2841er_set_ts_clock_mode(struct cxd2841er_priv *priv,
 	cxd2841er_read_reg(priv, I2C_SLVT, 0xde, &ts_in_off);
 	dev_dbg(&priv->i2c->dev, "%s(): ser_ts=0x%02x rate_ctrl_off=0x%02x in_off=0x%02x\n",
 		__func__, serial_ts, ts_rate_ctrl_off, ts_in_off);
+
+  /* TODO */
+  /* Serial TS, so set serial TS specific registers */
+  /* 0x2 - High Freq, half rate
+   * 0x2 - High Freq, half rate
+   * 0x1 - High Freq, full rate 
+   */
+  /* serialClkMode */
+	cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xc4, 0x01, 0x03);
+  /* serialDutyMode */
+	cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xd1, 0x01, 0x03);
+
 
 	/*
 	 * slave    Bank    Addr    Bit    default    Name
@@ -882,6 +918,11 @@ static void cxd2841er_set_ts_clock_mode(struct cxd2841er_priv *priv,
 		cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x40);
 		cxd2841er_set_reg_bits(priv, I2C_SLVT, 0x66, 0x01, 0x01);
 	}
+
+	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x00);
+	cxd2841er_read_reg(priv, I2C_SLVT, 0xc4, &serial_ts);
+	dev_dbg(&priv->i2c->dev, "%s(): done ser_ts=0x%02x", 
+      __func__, serial_ts);
 }
 
 static u8 cxd2841er_chip_id(struct cxd2841er_priv *priv)
@@ -2557,7 +2598,11 @@ static int cxd2841er_sleep_tc_to_active_t2(struct cxd2841er_priv *priv,
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x30, 0x00);
 	/* Enable ADC 1 */
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x41, 0x1a);
-	/* xtal freq 20.5MHz */
+
+  if (priv->xtal == SONY_XTAL_41000) {
+    data[0] = 0x0A;
+    data[1] = 0xD4;
+  }
 	cxd2841er_write_regs(priv, I2C_SLVT, 0x43, data, 2);
 	/* Enable ADC 4 */
 	cxd2841er_write_reg(priv, I2C_SLVX, 0x18, 0x00);
@@ -2619,7 +2664,7 @@ static int cxd2841er_sleep_tc_to_active_i(struct cxd2841er_priv *priv,
 	u8 data24m2[3] = {0xB7, 0x1B, 0x00};
 
 	dev_dbg(&priv->i2c->dev, "%s()\n", __func__);
-	cxd2841er_set_ts_clock_mode(priv, SYS_DVBT);
+	cxd2841er_set_ts_clock_mode(priv, SYS_ISDBT);
 	/* Set SLV-X Bank : 0x00 */
 	cxd2841er_write_reg(priv, I2C_SLVX, 0x00, 0x00);
 	/* Set demod mode */
@@ -3216,6 +3261,9 @@ static int cxd2841er_init_s(struct dvb_frontend *fe)
 	/* SONY_DEMOD_CONFIG_SAT_IFAGCNEG set to 1 */
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0xa0);
 	cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xb9, 0x01, 0x01);
+
+  // cxd2841er_set_ts(fe);
+
 	return 0;
 }
 
@@ -3232,7 +3280,9 @@ static int cxd2841er_init_tc(struct dvb_frontend *fe)
 	cxd2841er_write_reg(priv, I2C_SLVT, 0xcd, 0x50);
 	/* SONY_DEMOD_CONFIG_PARALLEL_SEL = 1 */
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x00);
-	cxd2841er_set_reg_bits(priv, I2C_SLVT, 0xc4, 0x00, 0x80);
+
+  // cxd2841er_set_ts(fe);
+
 	return 0;
 }
 

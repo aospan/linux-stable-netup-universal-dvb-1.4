@@ -502,6 +502,10 @@ static enum helene_tv_system_t helene_get_tv_system(struct dvb_frontend *fe)
 			system = SONY_HELENE_DTV_ISDBT_8;
 			p->bandwidth_hz = 8000000;
 		}
+	} else if (p->delivery_system == SYS_DTMB) {
+		system = SONY_HELENE_DTV_DTMB;
+	} else if (p->delivery_system == SYS_ATSC) {
+		system = SONY_HELENE_DTV_8VSB;
 	} else if (p->delivery_system == SYS_DVBC_ANNEX_A) {
 		if (p->bandwidth_hz <= 6000000)
 			system = SONY_HELENE_DTV_DVBC_6;
@@ -899,7 +903,7 @@ static int helene_x_pon(struct helene_priv *priv)
 	data[0] = 0x18; /* xtal 24 MHz */
 	data[1] = (uint8_t)(0x80 | (0x04 & 0x1F)); /* 4 x 25 = 100uA */
 	data[2] = (uint8_t)(0x80 | (0x26 & 0x7F)); /* 38 x 0.25 = 9.5pF */
-	data[3] = 0x80; /* REFOUT signal output 500mVpp */
+	data[3] = 0x83; /* REFOUT signal output 500mVpp */
 	data[4] = 0x00; /* GPIO settings */
 	data[5] = 0x00; /* GPIO settings */
 	data[6] = 0xC4; /* Clock enable for internal logic block */

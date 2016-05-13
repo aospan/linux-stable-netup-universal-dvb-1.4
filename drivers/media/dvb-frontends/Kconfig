@@ -808,6 +808,13 @@ config DVB_ATBM8830
 	help
 	  A DMB-TH tuner module. Say Y when you want to support this frontend.
 
+config DVB_ATBM888x
+	tristate "AltoBeam ATBM888x DMB-TH demodulator"
+	depends on DVB_CORE && I2C
+	default m if !MEDIA_SUBDRV_AUTOSELECT
+	help
+	  A DMB-TH demodulator module. Say Y when you want to support this frontend.
+
 config DVB_TDA665x
 	tristate "TDA665x tuner"
 	depends on DVB_CORE && I2C

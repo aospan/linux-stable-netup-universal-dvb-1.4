@@ -56,7 +56,8 @@
 */
 enum netup_hw_rev {
 	NETUP_HW_REV_1_3 = 0x18F6,
-	NETUP_HW_REV_1_4 = 0x18F7
+	NETUP_HW_REV_1_4 = 0x18F7,
+	NETUP_HW_REV_2_0 = 0x18F8
 };
 
 struct netup_dma {

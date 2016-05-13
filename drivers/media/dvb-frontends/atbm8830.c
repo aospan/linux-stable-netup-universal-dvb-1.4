@@ -31,7 +31,7 @@
 			printk(KERN_DEBUG "atbm8830: " args); \
 	} while (0)
 
-static int debug;
+static int debug = 2;
 
 module_param(debug, int, 0644);
 MODULE_PARM_DESC(debug, "Turn on/off frontend debugging (default:off).");
@@ -424,6 +424,7 @@ static int atbm8830_read_ucblocks(struct dvb_frontend *fe, u32 *ucblocks)
 static int atbm8830_i2c_gate_ctrl(struct dvb_frontend *fe, int enable)
 {
 	struct atbm_state *priv = fe->demodulator_priv;
+  enable = 0;
 
 	return atbm8830_write_reg(priv, REG_I2C_GATE, enable ? 1 : 0);
 }
@@ -480,18 +481,18 @@ struct dvb_frontend *atbm8830_attach(const struct atbm8830_config *config,
 
 	/* check if the demod is there */
 	if (atbm8830_read_reg(priv, REG_CHIP_ID, &data) != 0) {
-		dprintk("%s atbm8830/8831 not found at i2c addr 0x%02X\n",
+		printk("%s atbm8830/8831 not found at i2c addr 0x%02X\n",
 			__func__, priv->config->demod_address);
 		goto error_out;
 	}
-	dprintk("atbm8830 chip id: 0x%02X\n", data);
+	printk("atbm8830 chip id: 0x%02X\n", data);
 
 	memcpy(&priv->frontend.ops, &atbm8830_ops,
 	       sizeof(struct dvb_frontend_ops));
 	priv->frontend.demodulator_priv = priv;
 
+  // aospan:hack
 	atbm8830_init(&priv->frontend);
-
 	atbm8830_i2c_gate_ctrl(&priv->frontend, 1);
 
 	return &priv->frontend;
