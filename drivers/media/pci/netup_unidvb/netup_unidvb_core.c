@@ -59,26 +59,32 @@ DVB_DEFINE_MOD_OPT_ADAPTER_NR(adapter_nr);
 #define GPIO_REG_IO_TOGGLE	0x4882
 #define GPIO_REG_IO_SET		0x4884
 #define GPIO_REG_IO_CLEAR	0x4886
+
 /* GPIO bits */
-#define GPIO_FEA_RESET		(1 << 0)
-#define GPIO_FEB_RESET		(1 << 1)
+/* port A */
+#define GPIO_FEA_DVB		(0 << 0)
+#define GPIO_FEA_DTMB		(1 << 0)
+#define GPIO_FEA_ATSC		(2 << 0)
 #define GPIO_RFA_CTL		(1 << 2)
-#define GPIO_RFB_CTL		(1 << 3)
-#define GPIO_FEA_TU_RESET	(1 << 4)
-#define GPIO_FEB_TU_RESET	(1 << 5)
+#define GPIO_FEA_TU_RESET	(1 << 3)
+#define GPIO_FEA_TU_IIC_EN (1 << 4)
+#define GPIO_FEA_DVB_nRST		(1 << 5)
+#define GPIO_FEA_DTMB_nRST	(1 << 6)
+#define GPIO_FEA_ATSC_nRST			(1 << 7)
 
-#define GPIO_FEA_DTMB	(1 << 6)
-#define GPIO_FEA_ATSC	(2 << 6)
-#define GPIO_FEB_DTMB	(1 << 8)
-#define GPIO_FEB_ATSC	(2 << 8)
+/* port B */
+#define GPIO_FEB_DVB		(0 << 8)
+#define GPIO_FEB_DTMB		(1 << 8)
+#define GPIO_FEB_ATSC		(2 << 8)
+#define GPIO_RFB_CTL		(1 << 10)
+#define GPIO_FEB_TU_RESET	(1 << 11)
+#define GPIO_FEB_TU_IIC_EN (1 << 12)
+#define GPIO_FEB_DVB_nRST				(1 << 13)
+#define GPIO_FEB_DTMB_nRST			(1 << 14)
+#define GPIO_FEB_ATSC_nRST			(1 << 15)
 
-/* TS muxing control */
-#define GPIO_FEA_DISABLE_DVB	(1 << 10)
-#define GPIO_FEA_DISABLE_DTMB	(1 << 11)
-#define GPIO_FEA_DISABLE_ATSC	(1 << 12)
-#define GPIO_FEB_DISABLE_DVB	(1 << 13)
-#define GPIO_FEB_DISABLE_DTMB	(1 << 14)
-#define GPIO_FEB_DISABLE_ATSC	(1 << 15)
+#define GPIO_FEA_ALL (GPIO_FEA_DVB | GPIO_FEA_DTMB | GPIO_FEA_ATSC)
+#define GPIO_FEB_ALL (GPIO_FEB_DVB | GPIO_FEB_DTMB | GPIO_FEB_ATSC)
 
 /* DMA base address */
 #define NETUP_DMA0_ADDR		0x4900
@@ -218,30 +224,52 @@ static int netup_unidvb_tuner_ctrl(void *priv, int is_dvb_tc)
 		reg |= mask;
 	else
 		reg &= ~mask;
+
 	writew(reg, ndev->bmmio0 + GPIO_REG_IO);
+
+	dev_info(&ndev->pci_dev->dev,
+		"%s(): GPIO_REG_IO 0x%x\n",
+		__func__, (int)readw(ndev->bmmio0 + GPIO_REG_IO));
+
 	return 0;
 }
 
-void reset_fe(struct netup_unidvb_dev *ndev){
-#if 0
-	u16 gpio_reg;
-  writew(0x00, ndev->bmmio0 + GPIO_REG_IO);
-  msleep(100);
-  gpio_reg =
-    GPIO_FEA_RESET | GPIO_FEB_RESET |
-    GPIO_FEA_TU_RESET | GPIO_FEB_TU_RESET |
-    GPIO_RFA_CTL | GPIO_RFB_CTL;
-  writew(gpio_reg, ndev->bmmio0 + GPIO_REG_IO);
-  printk("fe reset done\n");
-#endif
-	dev_dbg(&ndev->pci_dev->dev,
-		"%s(): GPIO_REG_IO 0x%x\n",
-		__func__, (int)readw(ndev->bmmio0 + GPIO_REG_IO));
+/* enable selected demods. other will be in reset state (disabled) */
+void enable_demods(struct netup_unidvb_dev *ndev, int demods){
+	u16 mask = 0, reg = 0;
+	reg = readw(ndev->bmmio0 + GPIO_REG_IO);
+
+	/* disable all by default */
+	mask = GPIO_FEA_ATSC_nRST | GPIO_FEB_ATSC_nRST |
+				 GPIO_FEA_DVB_nRST | GPIO_FEB_DVB_nRST |
+				 GPIO_FEA_DTMB_nRST | GPIO_FEB_DTMB_nRST |
+				 GPIO_FEA_ALL | GPIO_FEB_ALL;
+	reg &= ~mask;
+
+	mask = 0;
+	if (demods&NETUP_DEMOD_DVB)
+		mask |= GPIO_FEA_DVB_nRST | GPIO_FEB_DVB_nRST | GPIO_FEA_DTMB | GPIO_FEB_DVB; // hack
+		// mask |= GPIO_FEA_DVB_nRST | GPIO_FEB_DVB_nRST | GPIO_FEA_DVB | GPIO_FEB_DVB;
+	if (demods&NETUP_DEMOD_ATSC)
+		mask |= GPIO_FEA_ATSC_nRST | GPIO_FEB_ATSC_nRST | GPIO_FEA_ATSC | GPIO_FEB_ATSC;
+	if (demods&NETUP_DEMOD_DTMB)
+		mask |= GPIO_FEA_DTMB_nRST | GPIO_FEB_DTMB_nRST | GPIO_FEA_DTMB | GPIO_FEB_DTMB;
+	reg |= mask;
+	writew(reg, ndev->bmmio0 + GPIO_REG_IO);
+	msleep(10); // prophylactic
+
+	dev_info(&ndev->pci_dev->dev,
+		"%s(): enabling demods 0x%x mask 0x%x GPIO_REG_IO 0x%x\n",
+		__func__, demods, mask, (int)readw(ndev->bmmio0 + GPIO_REG_IO));
 }
 
 static void netup_unidvb_dev_enable(struct netup_unidvb_dev *ndev)
 {
 	u16 gpio_reg;
+
+  /* disable all demods first */ 
+	enable_demods(ndev, 0);
+	msleep(10);
 
 	/* enable PCI-E interrupts */
 	writel(AVL_IRQ_ENABLE, ndev->bmmio0 + AVL_PCIE_IENR);
@@ -249,36 +277,18 @@ static void netup_unidvb_dev_enable(struct netup_unidvb_dev *ndev)
 	writew(0x00, ndev->bmmio0 + GPIO_REG_IO);
 	msleep(100);
 	gpio_reg =
-		GPIO_FEA_RESET | GPIO_FEB_RESET |
 		GPIO_FEA_TU_RESET | GPIO_FEB_TU_RESET |
-		GPIO_RFA_CTL | GPIO_RFB_CTL;
-
-#if 0
-  /* enable DTBM */
-	gpio_reg |= GPIO_FEA_DTMB | GPIO_FEB_DTMB |
-    GPIO_FEA_DISABLE_DVB | GPIO_FEA_DISABLE_ATSC |
-    GPIO_FEB_DISABLE_DVB | GPIO_FEB_DISABLE_ATSC;
-#endif
-
-#if 1
-  /* enable DVB */
-	gpio_reg = gpio_reg |
-    GPIO_FEA_DISABLE_DTMB | GPIO_FEA_DISABLE_ATSC |
-    GPIO_FEB_DISABLE_DTMB | GPIO_FEB_DISABLE_ATSC;
-#endif
-
-#if 0
-  /* enable ATSC */
-	gpio_reg = gpio_reg | GPIO_FEA_ATSC | GPIO_FEB_ATSC |
-    GPIO_FEA_DISABLE_DTMB | GPIO_FEA_DISABLE_DVB |
-    GPIO_FEB_DISABLE_DTMB | GPIO_FEB_DISABLE_DVB;
-#endif
+		GPIO_RFA_CTL | GPIO_RFB_CTL
+		| GPIO_FEA_TU_IIC_EN | GPIO_FEB_TU_IIC_EN;
 
 	writew(gpio_reg, ndev->bmmio0 + GPIO_REG_IO);
-	dev_dbg(&ndev->pci_dev->dev,
+	dev_info(&ndev->pci_dev->dev,
 		"%s(): AVL_PCIE_IENR 0x%x GPIO_REG_IO 0x%x\n",
 		__func__, readl(ndev->bmmio0 + AVL_PCIE_IENR),
 		(int)readw(ndev->bmmio0 + GPIO_REG_IO));
+
+  /* enable all demods. will disable it after init */
+	enable_demods(ndev, NETUP_DEMOD_DVB|NETUP_DEMOD_ATSC|NETUP_DEMOD_DTMB);
 }
 
 static void netup_unidvb_dma_enable(struct netup_dma *dma, int enable)
@@ -428,7 +438,6 @@ static int netup_unidvb_start_streaming(struct vb2_queue *q, unsigned int count)
 
 	dev_dbg(&dma->ndev->pci_dev->dev, "%s()\n", __func__);
 	netup_unidvb_dma_enable(dma, 1);
-  reset_fe(dma->ndev);
 	return 0;
 }
 
@@ -723,6 +732,11 @@ static int netup_unidvb_dvb_setup(struct netup_unidvb_dev *ndev)
 		netup_unidvb_dvb_fini(ndev, 0);
 		return res;
 	}
+
+	/* 0 - enable 0 (disable all) */
+	enable_demods(ndev, NETUP_DEMOD_DVB);
+	// enable_demods(ndev, NETUP_DEMOD_DTMB);
+	// enable_demods(ndev, NETUP_DEMOD_ATSC);
 	return 0;
 }
 
@@ -1134,7 +1148,7 @@ static int netup_unidvb_initdev(struct pci_dev *pci_dev,
 	if (netup_unidvb_dvb_setup(ndev)) {
 		dev_err(&pci_dev->dev, "netup_unidvb: DVB setup failed\n");
         return 0;
-		// goto dvb_setup_err;
+		goto dvb_setup_err;
 	}
 	if (netup_unidvb_ci_setup(ndev, pci_dev)) {
 		dev_err(&pci_dev->dev, "netup_unidvb: CI setup failed\n");

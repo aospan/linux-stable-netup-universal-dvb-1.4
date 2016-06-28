@@ -50,6 +50,11 @@
 #define NETUP_UNIDVB_IRQ_CAM0	(1 << 11)
 #define NETUP_UNIDVB_IRQ_CAM1	(1 << 12)
 
+/* All demodulators used on board */
+#define	NETUP_DEMOD_DVB (1 << 0)
+#define	NETUP_DEMOD_ATSC (1 << 1)
+#define	NETUP_DEMOD_DTMB (1 << 2)
+
 /* NetUP Universal DVB card hardware revisions and it's PCI device id's:
  * 1.3 - CXD2841ER demod, ASCOT2E and HORUS3A tuners
  * 1.4 - CXD2854ER demod, HELENE tuner
