@@ -2442,6 +2442,14 @@ static int cxd2841er_sleep_tc_to_active_c_band(struct cxd2841er_priv *priv,
 	u8 b10_b6[3];
 	u32 iffreq;
 
+	if (bandwidth != 6000000 &&
+			bandwidth != 7000000 &&
+			bandwidth != 8000000) {
+		dev_info(&priv->i2c->dev, "%s(): unsupported bandwidth %d. Forcing 8Mhz!\n",
+				__func__, bandwidth);
+		bandwidth = 8000000;
+	}
+
 	dev_dbg(&priv->i2c->dev, "%s()\n", __func__);
 	cxd2841er_write_reg(priv, I2C_SLVT, 0x00, 0x10);
 	switch (bandwidth) {
@@ -2459,7 +2467,7 @@ static int cxd2841er_sleep_tc_to_active_c_band(struct cxd2841er_priv *priv,
 		iffreq = MAKE_IFFREQ_CONFIG(3.7);
 		break;
 	default:
-		dev_dbg(&priv->i2c->dev, "%s(): unsupported bandwidth %d\n",
+		dev_err(&priv->i2c->dev, "%s(): unsupported bandwidth %d\n",
 			__func__, bandwidth);
 		return -EINVAL;
 	}
