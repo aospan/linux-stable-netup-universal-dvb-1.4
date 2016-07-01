@@ -248,8 +248,7 @@ void enable_demods(struct netup_unidvb_dev *ndev, int demods){
 
 	mask = 0;
 	if (demods&NETUP_DEMOD_DVB)
-		mask |= GPIO_FEA_DVB_nRST | GPIO_FEB_DVB_nRST | GPIO_FEA_DTMB | GPIO_FEB_DVB; // hack
-		// mask |= GPIO_FEA_DVB_nRST | GPIO_FEB_DVB_nRST | GPIO_FEA_DVB | GPIO_FEB_DVB;
+		mask |= GPIO_FEA_DVB_nRST | GPIO_FEB_DVB_nRST | GPIO_FEA_DVB | GPIO_FEB_DVB;
 	if (demods&NETUP_DEMOD_ATSC)
 		mask |= GPIO_FEA_ATSC_nRST | GPIO_FEB_ATSC_nRST | GPIO_FEA_ATSC | GPIO_FEB_ATSC;
 	if (demods&NETUP_DEMOD_DTMB)
