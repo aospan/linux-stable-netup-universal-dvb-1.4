@@ -394,6 +394,27 @@ static int helene_set_reg_bits(struct helene_priv *priv,
 	return helene_write_reg(priv, reg, data);
 }
 
+static int helene_dump_regs(struct helene_priv *priv)
+{
+	int reg = 0, res = 0;
+	u8 rdata;
+
+	/* dump some important registers */
+	for(reg = 0x68; reg < (0x68+17); reg++) {
+		res = helene_read_reg(priv, reg, &rdata);
+		if (res != 0)
+			return res;
+		dev_dbg(&priv->i2c->dev, "%s() reg=0x%x val=0x%x\n",
+				__func__, reg, rdata);
+	}
+	for(reg = 0x87; reg < (0x87+2); reg++) {
+		helene_read_reg(priv, reg, &rdata);
+		dev_dbg(&priv->i2c->dev, "%s() reg=0x%x val=0x%x\n",
+				__func__, reg, rdata);
+	}
+	return 0;
+}
+
 static int helene_enter_power_save(struct helene_priv *priv)
 {
 	dev_dbg(&priv->i2c->dev, "%s()\n", __func__);
@@ -687,6 +708,9 @@ static int helene_set_params(struct dvb_frontend *fe)
 				__func__);
 		return -EINVAL;
 	}
+	helene_leave_power_save(priv);
+
+	/* RF switch turn to terrestrial */
 	if (priv->set_tuner)
 		priv->set_tuner(priv->set_tuner_data, 1);
 	frequency = roundup(p->frequency / 1000, 25);
@@ -830,6 +854,10 @@ static int helene_set_params(struct dvb_frontend *fe)
 	}
 
 	helene_write_regs(priv, 0x68, data, 17);
+
+	msleep(50); /* allow tuner to settle */
+	helene_dump_regs(priv);
+	helene_enter_power_save(priv);
 
 	dev_dbg(&priv->i2c->dev, "%s(): tune done\n",
 			__func__);
