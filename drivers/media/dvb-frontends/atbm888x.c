@@ -24,6 +24,69 @@
 #include "atbm888x.h"
 #include "atbm888x_priv.h"
 
+uint8_t ui8AATBM888XCommonReg[]=
+{
+        0x02, 0x45, 0x33,
+        0x02, 0x4a, 0x96,
+        0x02, 0xc6, 0x00,
+        0x02, 0xc7, 0x01
+};
+
+uint8_t ui8AATBM888XDtmbSet[]=
+{
+        0x02, 0x28, 0x01,
+        0x02, 0xa6, 0x10,
+        0x02, 0xa9, 0x60,
+        0x02, 0xcb, 0x68,
+        0x02, 0xcc, 0x70,
+        0x02, 0x49, 0x30
+};
+
+uint8_t ui8AATBM888XDtmb24MSet[]=
+{
+        0x02, 0xC5, 0x15,
+        0x02, 0x4E, 0x10,
+        0x02, 0x3E, 0x28,
+        0x02, 0x3B, 0x28,
+        0x0A, 0xFB, 0x01,
+        0x02, 0x3C, 0x1C,
+        //0x13, 0x4e, 0x00,
+        //0x13, 0x75, 0x00
+};
+
+uint8_t ui8ADtmbInternal[]=
+{
+        0x00, 0x16, 0x1c, //DTMB mode   
+        0x09, 0x88, 0x08,
+        0x09, 0x89, 0x0c,
+        0x09, 0x9a, 0x40,
+        0x09, 0x35,0x14,
+        0x0a, 0xf9, 0x00,
+        0x0e, 0x01, 0x08,
+        0x08, 0x52, 0x28,
+        0x0c, 0x24, 0x0a,
+        0x0c, 0x26, 0x0a
+};
+
+uint8_t uiAATBMDynamicSetting[]={
+        0x09, 0x88, 0x08,
+        0x09, 0x89, 0x08,
+        0x09, 0x8b, 0x08,
+        0x09, 0x04, 0x01,
+        0x09, 0x05, 0x02,
+        0x09, 0x57, 0x00,
+        0x09, 0x5a, 0x02,
+        0x09, 0x59, 0x40,
+        0x09, 0x5b, 0x40,
+        0x14, 0x47, 0xc0,
+        0x13, 0x55, 0x00,
+        0x08, 0x6b, 0x00,//staic cfo c1  2015.1.28
+        0x08, 0x6d, 0x10,//static cfo c2
+        0x08, 0x8c, 0x00,//dy cfo c1
+        0x08, 0x8e, 0x10,//dy cfo c2
+        0x14, 0x47, 0x80//channel alpha filter
+};
+
 static int atbm888x_write_reg(struct atbm_state *priv, u16 reg, u8 data)
 {
 	int ret = 0;
@@ -37,7 +100,7 @@ static int atbm888x_write_reg(struct atbm_state *priv, u16 reg, u8 data)
 	msg1.addr = dev_addr;
 	msg2.addr = dev_addr;
 
-  dev_dbg(&priv->i2c->dev, "%s: reg=0x%04X, data=0x%02X\n", __func__, reg, data);
+	dev_dbg(&priv->i2c->dev, "%s: reg=0x%04X, data=0x%02X\n", __func__, reg, data);
 
 	ret = i2c_transfer(priv->i2c, &msg1, 1);
 	if (ret != 1)
@@ -45,6 +108,19 @@ static int atbm888x_write_reg(struct atbm_state *priv, u16 reg, u8 data)
 
 	ret = i2c_transfer(priv->i2c, &msg2, 1);
 	return (ret != 1) ? -EIO : 0;
+}
+
+static int atbm888x_write_reg_array(struct atbm_state *priv, uint8_t *table, int len)
+{
+	int i;
+	dev_dbg(&priv->i2c->dev, "%s: len=%d\n", __func__, len);
+	for(i = 0;i < len; i +=3 )
+	{
+		if((i + 2) < len)
+		{
+			atbm888x_write_reg(priv, (((u16)table[i]) << 8 | table[i+1]), table[i+2]);
+		}
+	}
 }
 
 static int atbm888x_read_reg(struct atbm_state *priv, u16 reg, u8 *p_data)
@@ -76,6 +152,20 @@ static int atbm888x_read_reg(struct atbm_state *priv, u16 reg, u8 *p_data)
       __func__, reg, buf2[0]);
 
 	return 0;
+}
+
+u8 atbm888x_chip_id(struct atbm_state *priv)
+{
+	u8 data = 0;
+	struct i2c_adapter *i2c = priv->i2c;
+
+	if (atbm888x_read_reg(priv, REG_CHIP_ID, &data) != 0) {
+		dev_err(&i2c->dev, "%s atbm888x not found at i2c addr 0x%02X\n",
+			__func__, priv->config->demod_address);
+		return 0;
+	}
+	dev_dbg(&i2c->dev, "atbm888x chip id: 0x%02X\n", data);
+	return data;
 }
 
 /* Lock register latch so that multi-register read is atomic */
@@ -134,17 +224,13 @@ static int set_if_freq(struct atbm_state *priv, u32 freq /*in kHz*/)
 		do_div(t, 1000);
 		val = t;
 
-    printk("val=0x%x \n", val);
+		printk("val=0x%x \n", val);
 
 		// atbm888x_write_reg(priv, REG_TUNER_BASEBAND, 1);
 		atbm888x_write_reg(priv, REG_IF_FREQ, val);
 		atbm888x_write_reg(priv, REG_IF_FREQ+1, val >> 8);
 		atbm888x_write_reg(priv, REG_IF_FREQ+2, val >> 16);
 
-		atbm888x_read_reg(priv, 0x060e, &dat);
-		dat |= 0x4;
-		atbm888x_write_reg(priv, 0x060e, dat);
-		atbm888x_write_reg(priv, 0x0afb, 0x01);
 	} else {
 		/* Zero IF */
 		atbm888x_write_reg(priv, REG_TUNER_BASEBAND, 0);
@@ -279,87 +365,130 @@ static int atbm888x_init(struct dvb_frontend *fe)
 {
 	struct atbm_state *priv = fe->demodulator_priv;
 	const struct atbm888x_config *cfg = priv->config;
-  uint8_t ui8pll = 0;
-  uint8_t ui8HardwareState = 0;
-  uint8_t ui8tmp = 0;
-	dev_dbg(&priv->i2c->dev, "%s\n", __func__);
+	uint8_t ui8pll = 0;
+	uint8_t ui8HardwareState = 0;
+	uint8_t ui8tmp = 0;
+	uint8_t u8ChipVersion, ui8ADCRfv;
+	u8 dat;
+	dev_dbg(&priv->i2c->dev, "%s:start\n", __func__);
 
 	atbm888x_wakeup(fe);
 
-  /* magic from refference driver */
-  atbm888x_write_reg(priv, 0x010c, 0x00);
-  atbm888x_write_reg(priv, 0x0606, 0x00);
-  atbm888x_write_reg(priv, 0x0103, 0x00);
-  atbm888x_read_reg(priv, 0x060e, &ui8pll);
-  atbm888x_write_reg(priv, 0x0604, 0x01);
-  ui8pll |= 0x01;
-  atbm888x_write_reg(priv, 0x060e,ui8pll);
-  ui8pll &= 0xfe;
-  atbm888x_write_reg(priv, 0x060e,ui8pll);
-  atbm888x_write_reg(priv, 0x0604, 0x00);
-  msleep(1);
+	/* magic from refference driver */
+	atbm888x_write_reg(priv, 0x010c, 0x00);
+	atbm888x_write_reg(priv, 0x0606, 0x00);
+	atbm888x_write_reg(priv, 0x0103, 0x00);
+	atbm888x_read_reg(priv, 0x060e, &ui8pll);
+	atbm888x_write_reg(priv, 0x0604, 0x01);
+	ui8pll |= 0x01;
+	atbm888x_write_reg(priv, 0x060e,ui8pll);
+	ui8pll &= 0xfe;
+	atbm888x_write_reg(priv, 0x060e,ui8pll);
+	atbm888x_write_reg(priv, 0x0604, 0x00);
+	msleep(1);
 
-  atbm888x_write_reg(priv, 0x010c, 0x01);//i2c clock using PLL, 1:PLL, 0:Crystal.
-  atbm888x_write_reg(priv, 0x0004, 0x00);
-  atbm888x_write_reg(priv, 0x10f7, 0xea); // inverted AGC
-  // atbm888x_write_reg(priv, 0x10f7, 0xe8);
-  atbm888x_write_reg(priv, 0x10fb, 0x06); // PWM mode of AGC output is required (default is PDM)
-  //atbm888x_write_reg(priv, 0x10fb, 0x07);
+	atbm888x_write_reg(priv, 0x010c, 0x01);//i2c clock using PLL, 1:PLL, 0:Crystal.
+	atbm888x_write_reg(priv, 0x0004, 0x00);
+	atbm888x_write_reg(priv, 0x10f7, 0xea); // inverted AGC
+	// atbm888x_write_reg(priv, 0x10f7, 0xe8);
+	atbm888x_write_reg(priv, 0x10fb, 0x06); // PWM mode of AGC output is required (default is PDM)
+	//atbm888x_write_reg(priv, 0x10fb, 0x07);
 
-  /* ui8AATBM888XCommonReg */
-  atbm888x_write_reg(priv, 0x0245, 0x33);
-  atbm888x_write_reg(priv, 0x024a, 0x96);
-  atbm888x_write_reg(priv, 0x02c6, 0x00);
-  atbm888x_write_reg(priv, 0x02c7, 0x01);
+	atbm888x_write_reg_array(priv, ui8AATBM888XCommonReg,sizeof(ui8AATBM888XCommonReg));
 
-  /* no swap IQ */
-  atbm888x_write_reg(priv, REG_SWAP_I_Q, 0x01);
+	/* no swap IQ */
+	atbm888x_write_reg(priv, REG_SWAP_I_Q, 0x01);
+	/*Set IF frequency*/
+	set_if_freq(priv, cfg->if_freq);
 
 	/*Set oscillator frequency*/
 	set_osc_freq(priv, cfg->osc_clk_freq);
 
-	/*Set IF frequency*/
-	set_if_freq(priv, cfg->if_freq);
+	/* TODO: all this values calculated
+	 * for 24MHz xtal 
+	 * and 8MHz BW */
+
+	/* set ADC rate ratio */
+	atbm888x_read_reg(priv, 0x060e, &dat);
+	dat |= 0x4;
+	atbm888x_write_reg(priv, 0x060e, dat);
+	atbm888x_write_reg(priv, 0x0afb, 0x01);
+
+	/* ui16ParamsFSADC */
+	atbm888x_write_reg(priv, 0x0233, 0x01);
+	atbm888x_write_reg(priv, 0x0234, 0xc0);
+	/* ui32ParamsFSADCInverse */
+	atbm888x_write_reg(priv, 0x029d, 0x56);
+	atbm888x_write_reg(priv, 0x029e, 0x55);
+	atbm888x_write_reg(priv, 0x029f, 0x03);
+	/* ui16ParamsIFFreq */
+	atbm888x_write_reg(priv, 0x0231, 0x01);
+	atbm888x_write_reg(priv, 0x0232, 0x28);
+
+	atbm888x_write_reg(priv, 0x0251, 0x00);
+	atbm888x_write_reg(priv, 0x0290, 0xd0);
+	atbm888x_write_reg(priv, 0x0291, 0x93);
+	atbm888x_write_reg(priv, 0x0292, 0x01);
 
 	/*Set AGC Config*/
 	set_agc_config(priv, cfg->agc_min, cfg->agc_max,
-		cfg->agc_hold_loop);
+			cfg->agc_hold_loop);
 
 	/*Set static channel mode*/
 	set_static_channel_mode(priv);
 
 	set_ts_config(priv);
 
-  /* magic */
-  atbm888x_write_reg(priv, 0x000a, 0x01);
-  atbm888x_write_reg(priv, 0x0009, 0x01);         
-  atbm888x_write_reg(priv, 0x0013, 0x00); //DTMB mode
-  atbm888x_write_reg(priv, 0x1518, 0x00);            
-  atbm888x_write_reg(priv, 0x1515, 0x00);
-  atbm888x_write_reg(priv, 0x1511, 0x00); 
-  atbm888x_write_reg(priv, 0x1512, 0x00);
+	/* magic */
+	atbm888x_write_reg(priv, 0x000a, 0x01);
+	atbm888x_write_reg(priv, 0x0009, 0x01);         
+	atbm888x_write_reg(priv, 0x0013, 0x00); //DTMB mode
+	atbm888x_write_reg(priv, 0x1518, 0x00);            
+	atbm888x_write_reg(priv, 0x1515, 0x00);
+	atbm888x_write_reg(priv, 0x1511, 0x00); 
+	atbm888x_write_reg(priv, 0x1512, 0x00);
 
-	atbm888x_write_reg(priv, 0x000A, 0);
+	atbm888x_write_reg(priv, 0x0252, 0x00);
+	/* ui8AATBM888XDtmbSet */
+	atbm888x_write_reg_array(priv, ui8AATBM888XDtmbSet,sizeof(ui8AATBM888XDtmbSet));
+	/* ui8AATBM888XDtmb24MSet */
+	atbm888x_write_reg_array(priv, ui8AATBM888XDtmb24MSet,sizeof(ui8AATBM888XDtmb24MSet));
+	atbm888x_write_reg_array(priv, ui8ADtmbInternal,sizeof(ui8ADtmbInternal));
+	atbm888x_write_reg_array(priv, uiAATBMDynamicSetting,sizeof(uiAATBMDynamicSetting));
 
-  /* check state */
-  /* After hardware power on properly or reset correctly,      
-   * ui8HardwareState value should be 0x05 when using crystal, 3.3V PLL 
-   * ui8HardwareState value should be 0x07 when using oscillator, 3.3V PLL */
-  atbm888x_read_reg(priv, 0x0607, &ui8HardwareState);
+	atbm888x_read_reg(priv, 0x0022, &u8ChipVersion);
+	dev_dbg(&priv->i2c->dev, "%s u8ChipVersion=0x%x\n", __func__, u8ChipVersion);
+	if((u8ChipVersion&0xff) == 0xf0)
+        {
+                atbm888x_read_reg(priv, 0x060d, &ui8ADCRfv);
+                ui8ADCRfv |=0x08;
+                atbm888x_write_reg(priv, 0x060d, ui8ADCRfv);
+                atbm888x_write_reg(priv, 0x0c02, 0x02);
+        }
+
+	atbm888x_write_reg(priv,0x0800, 0x30);  //Should be set as calibrated from ATBM_PPM_Test() function
+	atbm888x_write_reg(priv,0x0801, 0x16);  //Should be set as calibrated from ATBM_PPM_Test() function
+
+#if 0
+	/* check state */
+	/* After hardware power on properly or reset correctly,      
+	 * ui8HardwareState value should be 0x05 when using crystal, 3.3V PLL 
+	 * ui8HardwareState value should be 0x07 when using oscillator, 3.3V PLL */
+	atbm888x_read_reg(priv, 0x0607, &ui8HardwareState);
 	dev_dbg(&priv->i2c->dev, "%s ui8HardwareState=0x%x\n", __func__, ui8HardwareState);
 
-  /* check PLL lock flag */
-  atbm888x_read_reg(priv, 0x0611, &ui8tmp);
+	/* check PLL lock flag */
+	atbm888x_read_reg(priv, 0x0611, &ui8tmp);
 	dev_dbg(&priv->i2c->dev, "%s ui8Flag=0x%x\n", __func__, ui8tmp);
 
-  /* check Current software version */
-  atbm888x_read_reg(priv, 0x020c, &ui8tmp);
+	/* check Current software version */
+	atbm888x_read_reg(priv, 0x020c, &ui8tmp);
 	dev_dbg(&priv->i2c->dev, "%s Current software version=0x%x\n", __func__, ui8tmp);
 
-  atbm888x_read_reg(priv, 0x0004, &ui8tmp);
+	atbm888x_read_reg(priv, 0x0004, &ui8tmp);
 	dev_dbg(&priv->i2c->dev, "%s ui8ConfigDone=0x%x\n", __func__, ui8tmp);
 
-  atbm888x_read_reg(priv, 0x000A, &ui8tmp);
+	atbm888x_read_reg(priv, 0x000A, &ui8tmp);
 	dev_dbg(&priv->i2c->dev, "%s ui8SDPReset=0x%x\n", __func__, ui8tmp);
 
 	/*Turn off DSP reset*/
@@ -367,10 +496,12 @@ static int atbm888x_init(struct dvb_frontend *fe)
 
 	/*SW version test*/
 	atbm888x_write_reg(priv, 0x020C, 141);
+#endif
 
 	/* Run */
 	atbm888x_write_reg(priv, REG_DEMOD_RUN, 1);
 
+	dev_dbg(&priv->i2c->dev, "%s:done\n", __func__);
 	return 0;
 }
 
@@ -418,7 +549,8 @@ static int atbm888x_set_fe(struct dvb_frontend *fe)
 	struct atbm_state *priv = fe->demodulator_priv;
 	int i;
 	u8 locked = 0;
-	dev_dbg(&priv->i2c->dev, "%s\n", __func__);
+	dev_dbg(&priv->i2c->dev, "%s:start\n", __func__);
+	printk("aospan:atbm888x_chip_id=0x%x \n", atbm888x_chip_id(priv));
 
 	/* set frequency */
 	if (fe->ops.tuner_ops.set_params) {
@@ -440,6 +572,7 @@ static int atbm888x_set_fe(struct dvb_frontend *fe)
 		}
 	}
 
+	dev_dbg(&priv->i2c->dev, "%s:done\n", __func__);
 	return 0;
 }
 
@@ -488,10 +621,14 @@ static int atbm888x_read_status(struct dvb_frontend *fe,
 	struct atbm_state *priv = fe->demodulator_priv;
 	u8 locked = 0;
 	u8 agc_locked = 0;
-  uint8_t agc0, agc1;
-  uint16_t agc_value;
+	uint8_t agc0, agc1;
+	uint16_t agc_value;
 
+#if 1
 	dev_dbg(&priv->i2c->dev, "%s\n", __func__);
+	printk("aospan:atbm888x_chip_id=0x%x \n", atbm888x_chip_id(priv));
+#endif
+
 	*fe_status = 0;
 
 	is_locked(priv, &locked);
@@ -501,9 +638,13 @@ static int atbm888x_read_status(struct dvb_frontend *fe,
 	}
 	dev_dbg(&priv->i2c->dev, "%s: fe_status=0x%x\n", __func__, *fe_status);
 
+#if 0
 	atbm888x_read_reg(priv, REG_AGC_LOCK, &agc_locked);
 	dev_dbg(&priv->i2c->dev, "AGC Lock: %d\n", agc_locked);
+#endif
 
+	/* Reading AGC can cause AGC pin to 0V ! */
+#if 0
   /* read AGC value:
    * the AGC Value is related with AGC voltage: about (1024/3.3)*V_agc
    */
@@ -513,7 +654,7 @@ static int atbm888x_read_status(struct dvb_frontend *fe,
   agc_value = (uint16_t)(((agc1&0x03)<<8)|agc0);
 	atbm888x_write_reg(priv, 0x084d, 0); // unlock value
 	dev_dbg(&priv->i2c->dev, "AGC value: %d\n", agc_value);
-
+#endif
 	return 0;
 }
 
@@ -585,7 +726,7 @@ static int atbm888x_read_ucblocks(struct dvb_frontend *fe, u32 *ucblocks)
 static int atbm888x_i2c_gate_ctrl(struct dvb_frontend *fe, int enable)
 {
 	struct atbm_state *priv = fe->demodulator_priv;
-  enable = 0;
+	enable = 0;
 
 	return atbm888x_write_reg(priv, REG_I2C_GATE, enable ? 1 : 0);
 }
@@ -621,6 +762,7 @@ static struct dvb_frontend_ops atbm888x_ops = {
 	.read_snr = atbm888x_read_snr,
 	.read_ucblocks = atbm888x_read_ucblocks,
 };
+
 
 struct dvb_frontend *atbm888x_attach(const struct atbm888x_config *config,
 	struct i2c_adapter *i2c)
@@ -659,8 +801,10 @@ struct dvb_frontend *atbm888x_attach(const struct atbm888x_config *config,
 	priv->frontend.demodulator_priv = priv;
 
 	atbm888x_init(&priv->frontend);
+	printk("aospan:atbm888x_chip_id=0x%x \n", atbm888x_chip_id(priv));
 	atbm888x_i2c_gate_ctrl(&priv->frontend, 1);
 
+	printk("aospan:atbm888x_chip_id=0x%x \n", atbm888x_chip_id(priv));
 	return &priv->frontend;
 
 error_out:
